@@ -17,7 +17,7 @@
 //	unsigned long s_addr;
 //}
 
-void *process_request(void *arg){
+void *process_request(void *arg){//testing git commit
 	printf("in thread\n");
 	int c_sock = *((int *) arg);
 	ssize_t rec_size;
