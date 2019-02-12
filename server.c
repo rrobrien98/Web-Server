@@ -6,6 +6,9 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include <string.h>
+#include <time.h>
+#include <errno.h>
 
 //struct sockaddr_in{
 //	short sin_family;
@@ -16,29 +19,178 @@
 //struct in_addr{
 //	unsigned long s_addr;
 //}
+char* doc_root;
 
-void *process_request(void *arg){//testing git commit
-	printf("in thread\n");
+void *process_request(void *arg){
+	char* file_data;
+	char droot_copy[50];
+	strcpy(droot_copy, doc_root);	
 	int c_sock = *((int *) arg);
-	ssize_t rec_size;
+	int rec_size = 0;
 	char request[1024];
-	char * response = "Hello Client";//make outside function
+	long fsize = 0;
 	pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	int proto;
+	char* point_name;
+	char* point_type;
+	char* point_proto;
+	char* file;
+	int keep_open = 1;
+	while(keep_open){
+		int keep_requesting = 1;
+		//printf("waiting for message\n");
+		while(keep_requesting){
+			printf("waiting for message\n");	
+			rec_size += recv(c_sock, request+rec_size,1024,0);
+		       		//printf("receiving error");
+			
+			if (!strcmp((request + rec_size -4), "\r\n\r\n\0")){
+				keep_requesting = 0;
+			}
+		}
 
-	if((rec_size = recv(c_sock, request,1024,0))<0){
-	       printf("receiving error");
-	}	       
-	printf("%s\n", request);
-	send(c_sock, response, 1024, 0);
+		printf("request: \n%s", request);
+
+		point_name = strstr(request, "GET /") + 5;
+		point_type = strstr(request, ".") + 1;
+		point_proto = strstr(request, " HTTP/1.") + 8;
+		file = (char*) malloc(100 * sizeof(char));
+
+		char* type = (char*) malloc(100 * sizeof(char));
+	
+		char* response_code;
+		if (point_name != NULL && point_proto != NULL){
+			proto = *point_proto - '0';
+			keep_open = proto;
+			if (point_type == NULL || (point_type >= point_proto) ){
+				file = "index";
+				type = "html";
+			}
+			else{
+				char* file_copy = file;
+				for ( ; point_name != (point_type -1); point_name++){
+				
+	
+					*file_copy = *point_name;
+					file_copy++;
+				}
+				char* type_copy = type;
+				char* j = point_type;
+				for ( j; j != (point_proto -8); j++){
+
+					*type_copy = *j;
+	
+					type_copy++;
+				}
+			}
+			//printf("%s, %s, %s\n", file, type, point_proto);
+				
+			strcat(droot_copy, "/");
+			strcat(droot_copy, file);
+			strcat(droot_copy, ".");
+			strcat(droot_copy, type);
+			printf("address: %s\n", droot_copy);
+		
+			FILE *fp;
+			if((fp = fopen(droot_copy, "r")) == NULL){
+				printf("error opening file\n");
+				if(errno == 2){
+					response_code = " 404 Not Found\n";
+				}
+				else if(errno == 13){
+					response_code = " 403 Forbidden\n";
+				}
+				file_data = "";
+			}
+			else{
+				response_code = " 200 OK\n";
+				fseek(fp, 0 , SEEK_END);
+				fsize = ftell(fp);
+				fseek(fp, 0, SEEK_SET);
+				file_data = (char*) malloc(fsize + 1);
+	
+				fread(file_data, fsize, 1, fp);
+				fclose(fp);
+	
+				file_data[fsize] = 0;
+			
+			}
+		}
+		else{
+
+			response_code = " 400 Bad Request\n";
+			keep_open=0;
+		}			
+		time_t date = time(0);
+		char response_time[1000];
+		struct tm tm = *gmtime(&date);
+		strftime(response_time, sizeof(response_time), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+		
+	
+			//send(c_sock, response, 1024, 0);
+
+
+
+	
+		char* response = (char*) malloc( sizeof(char) * 1000);
+		char size[10];
+		char protocol[10];
+
+		sprintf(size, "%li", fsize);
+		sprintf(protocol, "%d", proto);
+	
+		strcat(response, "HTTP/1.");
+	
+		strcat(response,  protocol);
+	
+		strcat(response, response_code);
+		strcat(response, "Date : ");
+		strcat(response, response_time);
+		strcat(response, "\n");
+		strcat(response, "Content-Length: ");
+	
+		strcat(response, size);
+		
+		strcat(response, "\n");
+		strcat(response, "Content-Type: ");
+		strcat(response, type);
+		strcat(response, "\n\n");
+		strcat(response, file_data);
+		//printf("response:\n %s", response);
+		send(c_sock, response, 1000, 0);
+	
+		free(file_data);
+		free(response);
+		free(file);
+		free(type);
+		strcpy(request, "");
+		strcpy(droot_copy, "");
+		strcpy(droot_copy,doc_root);
+		printf("docroot %s\n", droot_copy);
+		strcpy(point_type, "");
+		strcpy(point_proto, "");
+		strcpy(point_name, "");
+		if (keep_open){
+			struct timeval tv;
+			tv.tv_sec = 1;
+			tv.tv_usec = 0;
+			int timeout_stat = setsockopt(c_sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv, sizeof(struct timeval));
+			printf("timeout worked:%d, %d\n", timeout_stat, errno);
+			int test = recv(c_sock, request, 1024,0);
+			printf("shouldnt get here, %d\n", test);
+		}
+		
+	}
 	close(c_sock);
 	pthread_exit(NULL);
+ 
 
-
+	return NULL;
 }
 int main(int argc, char** argv){
 	int p_num = 8888;
 
-	char* doc_root;
+	
 
 	int c;
  		
@@ -89,7 +241,7 @@ int main(int argc, char** argv){
 		printf("listening error\n");
 		return -1;
 	}
-	printf("listening for connection\n");
+
 
 	while(1){
 		addrlen = sizeof(myaddr);
@@ -111,6 +263,7 @@ int main(int argc, char** argv){
 		
 	}
 	//pthread_join(response, NULL);
+	
 	return 0;
 }
 
