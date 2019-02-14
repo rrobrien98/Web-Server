@@ -9,7 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
-
+#include <sys/sendfile.h>
 //struct sockaddr_in{
 //	short sin_family;
 //	u_short sin_port;
@@ -23,6 +23,8 @@ char* doc_root;
 
 void *process_request(void *arg){
 	//char* file_data;
+	int file_num;
+	off_t offset;
 	char droot_copy[50];
 	strcpy(droot_copy, doc_root);	
 	int c_sock = *((int *) arg);
@@ -37,24 +39,27 @@ void *process_request(void *arg){
 	//char* file;
 	int keep_open = 1;
 	while(keep_open){
+		FILE *fp;
 		char request[1024] = {0};
-		char file_data[5000] = {0};
+		//char file_data[5000] = {0};
 		//char* file_data;
 		int keep_requesting = 1;
 		//printf("waiting for message\n");
 		rec_size = 0;
 		while(keep_requesting){
-			printf("waiting for message\n");	
+			//printf("waiting for message\n");	
 			//printf("request buffer %s\n", request);
-			if ((rec_size += recv(c_sock, request + rec_size,1024,0)) < 0){
+			if ((rec_size += recv(c_sock, request + rec_size,1,0)) < 0){
 		       		//printf("receiving error");
 			}
 			//if(!rec_size){
 			//	keep_requesting = 0;
 			//}
-			keep_requesting = 0;
-			printf("%s\n",request);
-			if (!strcmp((request + rec_size -4), "\r\n\r\n\0")){
+			//keep_requesting = 0;
+			//printf("%s\n",request);
+			//if (!strcmp((request + rec_size -4), "\r\n\r\n\0")){
+			char * end_test;
+			if((end_test = strstr(request, "\r\n\r\n")) != NULL){
 				printf("checked for returns\n");
 				keep_requesting = 0;
 			}
@@ -124,7 +129,7 @@ void *process_request(void *arg){
 			strcat(droot_copy, type);
 			printf("address: %s\n", droot_copy);
 		
-			FILE *fp;
+			//FILE *fp;
 			//char* file_data;
 			if((fp = fopen(droot_copy, "rb")) == NULL){
 				//printf("errno %d\n", errno);
@@ -143,19 +148,22 @@ void *process_request(void *arg){
 				fsize = ftell(fp);
 				fseek(fp, 0, SEEK_SET);
 				//char file_contents[fsize+1];// = (char*) malloc(fsize + 1);
+				file_num = fileno(fp);
+				offset = 0;
+				//sendfile(c_sock, file_num, &offset, fsize); 
 				//rewind(fp);
-				fread(file_data, fsize, 1, fp);
-				fclose(fp);
-				
-				printf("read data\n");
+				//fread(file_data, fsize, 1, fp);
+				//fclose(fp);
+					
+				//printf("read data\n");
 				//file_data[fsize] = '\0';
 						
 				//file_data = file_contents;
-				file_data[fsize] = '\0';
+				//file_data[fsize] = '\0';
 				//strcat(file_data, "\0");
 				//strcpy(file_data, file_contents);
-				printf("file data %s\n", file_data);	
-				printf("file length %li\n", strlen(file_data));
+				//printf("file data %s\n", file_data);	
+				//printf("file length %li\n", strlen(file_data));
 			}
 		}
 		else{
@@ -164,8 +172,8 @@ void *process_request(void *arg){
 			response_code = " 400 Bad Request\n";
 			keep_open=0;
 		}			
-		printf("file data outside %s\n", file_data);
-		printf("size of file %lu\n", strlen(file_data));
+		//printf("file data outside %s\n", file_data);
+		//printf("size of file %lu\n", strlen(file_data));
 		time_t date = time(0);
 		char response_time[1000];
 		struct tm tm = *gmtime(&date);
@@ -179,63 +187,84 @@ void *process_request(void *arg){
 		sprintf(size, "%li", fsize);
 		sprintf(protocol, "%d", proto);
 
-		int response_len = 7 + 1 + strlen(response_code) +1 + 7 + strlen(response_time) + 1 + 16 + strlen(size) + 1 + 14 + strlen(type)+ 2 + fsize + 1;
+		//int response_len = 7 + 1 + strlen(response_code) +1 + 7 + strlen(response_time) + 1 + 16 + strlen(size) + 1 + 14 + strlen(type)+ 2 + fsize + 1;
 		 
-		char response[response_len];
+		//char response[response_len];
 		
-		printf("size of file %lu\n", strlen(file_data));
+		//printf("size of file %lu\n", strlen(file_data));
 		
 
-		strcpy(response, "");	
+			
 	
-		strcat(response, "HTTP/1.");
+		send(c_sock, "HTTP/1.", 7,0);
+		send(c_sock, response_code, strlen(response_code), 0);
+		send(c_sock, "HTTP/1.", 7,0);
+		send(c_sock, "HTTP/1.", 7,0);
 	
-		strcat(response,  protocol);
+		send(c_sock, "\n", 1,0);
+		send(c_sock, "Date : ", 7,0);
+		send(c_sock, "response_time", strlen(response_time),0);
+		send(c_sock, "\n", 1,0);
+		send(c_sock, "Content-Length", 16,0);
+		send(c_sock, size, strlen(size),0);
+		send(c_sock, "\n", 1,0);
+		send(c_sock, "Content-Type: ", 14,0);
+		send(c_sock, type, strlen(type),0);
+		send(c_sock, "\n\n", 2,0);
+		if(file_num){
+			
+			sendfile(c_sock, file_num, &offset, fsize); 
+			fclose(fp);
+		}	
+
+		//send(c_sock, "HTTP/1.", 7,0);
+
+		//strcat(response,  protocol);
 		
-		strcat(response, response_code);
-		strcat(response, "\n");
-		strcat(response, "Date : ");
-		strcat(response, response_time);
-		strcat(response, "\n");
-		strcat(response, "Content-Length: ");
+		//strcat(response, response_code);
+		//strcat(response, "\n");
+		//strcat(response, "Date : ");
+		//strcat(response, response_time);
+		//strcat(response, "\n");
+		//strcat(response, "Content-Length: ");
 	
-		strcat(response, size);
+		//strcat(response, size);
 		
-		strcat(response, "\n");//send file
-		strcat(response, "Content-Type: ");
-		strcat(response, type);
-		strcat(response, "\n\n");
-		strcat(response, file_data);
-		strcat(response, "\0");
-		printf("response : %s\n",response);
+		//strcat(response, "\n");//send file
+		//strcat(response, "Content-Type: ");
+		//strcat(response, type);
+		//strcat(response, "\n\n");
+		//strcat(response, file_data);
+		//strcat(response, "\0");
+		//printf("response : %s\n",response);
 		//printf("response end:\n %d", *(response +strlen(response) -2) - '0');
-		int keep_sending = 1;
-		while(keep_sending){
-			int sent = 0;
-			printf("sending\n");
-			if((sent += send(c_sock, response + sent, strlen(response), 0)) < 0){
-				printf("error sending\n");
-			}
-			if(sent == strlen(response)){
-			//if(!strcmp(response + sent, "")){
-				keep_sending = 0;
+		//int keep_sending = 1;
+		//while(keep_sending){
+		//	int sent = 0;
+		//	printf("sending\n");
+		//	if((sent += send(c_sock, response + sent, strlen(response), 0)) < 0){
+		//		printf("error sending\n");
+		//	}
+		//	if(sent == strlen(response)){
+		//	//if(!strcmp(response + sent, "")){
+		//		keep_sending = 0;
 			//	printf("response so far%s\n", response);
-				printf("stopped sending\n");
-			}
-		}
-		memset(file_data,0, 5000);
+		//		printf("stopped sending\n");
+		//	}
+		//}
+		//memset(file_data,0, 5000);
 		///memset(file_data,"");
 		//free(file_data);
-		memset(response, 0, response_len); 
+		//memset(response, 0, response_len); 
 		//strcpy(response, "");
 		//free(response);
-		memset(file,0,50);
+		//memset(file,0,50);
 		//strcpy(file, "");
 		//free(file);
-		memset(type,0,50);
+		//memset(type,0,50);
 		//strcpy(type, "");
 		//free(type);
-		memset(request, 0 , 1024);
+		//memset(request, 0 , 1024);
 		//strcpy(request, "");
 		strcpy(droot_copy, "");
 		strcpy(droot_copy,doc_root);
