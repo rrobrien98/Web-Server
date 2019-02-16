@@ -20,9 +20,12 @@
 //	unsigned long s_addr;
 //}
 char* doc_root;
+int num_connections;
+pthread_mutex_t lock;
 
 void *process_request(void *arg){
 	//char* file_data;
+	pthread_mutex_lock(&lock);
 	int file_num;
 	off_t offset;
 	char droot_copy[50];
@@ -65,7 +68,8 @@ void *process_request(void *arg){
 			}
 			if(!strcmp(request,"")){
 				close(c_sock);
-
+				num_connections--;
+				pthread_mutex_unlock(&lock);
 				printf("socket closed\n");
 				return NULL;
 			}
@@ -140,6 +144,10 @@ void *process_request(void *arg){
 				else if(errno == 13){
 					response_code = " 403 Forbidden\0";
 				}
+				
+				else if(errno == 13){
+					response_code = " 403 Forbidden\0";
+				}
 				//file_data = "";
 			}
 			else{
@@ -178,7 +186,7 @@ void *process_request(void *arg){
 		char response_time[1000];
 		struct tm tm = *gmtime(&date);
 		strftime(response_time, sizeof(response_time), "%a, %d %b %Y %H:%M:%S %Z", &tm);
-		strcat(response_time, "\0");
+		//strcat(response_time, "\0");
 	
 			//send(c_sock, response, 1024, 0);
 		char size[10];
@@ -189,33 +197,72 @@ void *process_request(void *arg){
 
 		//int response_len = 7 + 1 + strlen(response_code) +1 + 7 + strlen(response_time) + 1 + 16 + strlen(size) + 1 + 14 + strlen(type)+ 2 + fsize + 1;
 		 
-		//char response[response_len];
+		char response[1000]= "HTTP/1.";
 		
 		//printf("size of file %lu\n", strlen(file_data));
 		
 
 			
+		//printf("length type %d",(int)  strlen(type));
+		//send(c_sock, "HTTP/1.", 7,0);
+		//send(c_sock, protocol, strlen(protocol), 0);
+		//send(c_sock, response_code, strlen(response_code), 0);
 	
-		send(c_sock, "HTTP/1.", 7,0);
-		send(c_sock, response_code, strlen(response_code), 0);
-		send(c_sock, "HTTP/1.", 7,0);
-		send(c_sock, "HTTP/1.", 7,0);
 	
-		send(c_sock, "\n", 1,0);
-		send(c_sock, "Date : ", 7,0);
-		send(c_sock, "response_time", strlen(response_time),0);
-		send(c_sock, "\n", 1,0);
-		send(c_sock, "Content-Length", 16,0);
-		send(c_sock, size, strlen(size),0);
-		send(c_sock, "\n", 1,0);
-		send(c_sock, "Content-Type: ", 14,0);
-		send(c_sock, type, strlen(type),0);
-		send(c_sock, "\n\n", 2,0);
+		//send(c_sock, "\n", 1,0);
+		//send(c_sock, "Date : ", 7,0);
+		//send(c_sock, "response_time", strlen(response_time),0);
+		//send(c_sock, "\n", 1,0);
+		//send(c_sock, "Content-Length", 16,0);
+		//send(c_sock, size, strlen(size),0);
+		//send(c_sock, "\n", 1,0);
+		//send(c_sock, "Content-Type: ", 14,0);
+		//send(c_sock, type, strlen(type),0);
+		//send(c_sock, "\n\n", 2,0);
+		
+		
+		
+		
+		
+		
+		
+		strcat(response,  protocol);
+		
+		strcat(response, response_code);
+		strcat(response, "\n");
+		strcat(response, "Date: ");
+		strcat(response, response_time);
+		strcat(response, "\n");
+		strcat(response, "Content-Length: ");
+	
+		strcat(response, size);
+		
+		strcat(response, "\n");//send file
+		strcat(response, "Content-Type: ");
+		strcat(response, type);
+		strcat(response, "\n\n");
+		//strcat(response, file_data);
+		strcat(response, "\0");
+		printf("response %s,%d\n", response, (int) strlen(response));	
+		size_t to_send = strlen(response);
+		int bytes_sent = 0;
+		while(to_send){
+			bytes_sent += send(c_sock,response+bytes_sent, to_send,0);
+			to_send = to_send - bytes_sent;
+		}
+		
 		if(file_num){
-			
-			sendfile(c_sock, file_num, &offset, fsize); 
+			//int keep_sending = 1;
+			bytes_sent = 0;
+			to_send = fsize;
+			while(to_send){	
+				bytes_sent += sendfile(c_sock, file_num, &offset, to_send); 
+				offset = bytes_sent;
+				to_send = to_send - bytes_sent;
+			}
 			fclose(fp);
 		}	
+		
 
 		//send(c_sock, "HTTP/1.", 7,0);
 
@@ -231,10 +278,6 @@ void *process_request(void *arg){
 		//strcat(response, size);
 		
 		//strcat(response, "\n");//send file
-		//strcat(response, "Content-Type: ");
-		//strcat(response, type);
-		//strcat(response, "\n\n");
-		//strcat(response, file_data);
 		//strcat(response, "\0");
 		//printf("response : %s\n",response);
 		//printf("response end:\n %d", *(response +strlen(response) -2) - '0');
@@ -287,7 +330,8 @@ void *process_request(void *arg){
 	close(c_sock);
 	pthread_exit(NULL);
  
-
+	num_connections--;
+	pthread_mutex_unlock(&lock);
 	return NULL;
 }
 int main(int argc, char** argv){
@@ -296,7 +340,10 @@ int main(int argc, char** argv){
 	
 
 	int c;
- 		
+ 	if (pthread_mutex_init(&lock, NULL) != 0){
+        	printf("\n mutex init failed\n");
+        	return -1;
+    	}
 	while ((c = getopt(argc,argv, "p:r:")) != -1){
 
 		switch (c) {
