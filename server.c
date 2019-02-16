@@ -318,7 +318,13 @@ void *process_request(void *arg){
 		
 		if (keep_open){
 			struct timeval tv;
-			tv.tv_sec = 7;
+			if (num_connections < 7){
+
+				tv.tv_sec = 7-num_connections;
+			}
+			else{
+				tv.tv_sec = 1;
+			}
 			tv.tv_usec = 0;
 			int timeout_stat = setsockopt(c_sock, SOL_SOCKET, SO_RCVTIMEO,(char *)&tv, sizeof(struct timeval));//test w/ telnet
 			printf("timeout worked:%d, %d\n", timeout_stat, errno);
